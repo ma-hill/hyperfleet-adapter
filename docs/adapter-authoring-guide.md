@@ -1174,10 +1174,11 @@ More information about deployment can be found in [Architecture repository - Hyp
 | Metric | Type | Description |
 |--------|------|-------------|
 | `hyperfleet_broker_messages_consumed_total` | Counter | Total messages consumed from the broker |
-| `hyperfleet_broker_errors_total` | Counter | Total message processing errors |
+| `hyperfleet_broker_messages_published_total` | Counter | Total messages published to the broker |
+| `hyperfleet_broker_errors_total` | Counter | Total message processing errors (labels: `topic`, `error_type`) |
 | `hyperfleet_broker_message_duration_seconds` | Histogram | Message processing duration |
 
-All broker metrics include `topic`, `component`, and `version` labels. The `component` label is set from the adapter's `metadata.name` in the AdapterConfig.
+These metrics use the `hyperfleet_broker_` prefix and include the adapter's `component` and `version` labels.
 
 ---
 
