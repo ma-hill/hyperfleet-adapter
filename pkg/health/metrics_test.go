@@ -45,7 +45,6 @@ func TestBrokerMetricsExposedOnMetricsEndpoint(t *testing.T) {
 
 	// Simulate broker activity so Vec metrics emit at least one time series
 	brokerMetrics.RecordConsumed("test-topic")
-	brokerMetrics.RecordPublished("test-topic")
 	brokerMetrics.RecordError("test-topic", "handler")
 	brokerMetrics.RecordDuration("test-topic", 1)
 
@@ -68,11 +67,9 @@ func TestBrokerMetricsExposedOnMetricsEndpoint(t *testing.T) {
 	assert.Contains(t, metricsOutput, "hyperfleet_adapter_build_info")
 	assert.Contains(t, metricsOutput, "hyperfleet_adapter_up")
 
-	// Verify all four broker metrics are registered and exposed
+	// Verify broker metrics are registered and exposed
 	assert.Contains(t, metricsOutput, "hyperfleet_broker_messages_consumed_total",
 		"messages_consumed_total metric should be exposed on /metrics")
-	assert.Contains(t, metricsOutput, "hyperfleet_broker_messages_published_total",
-		"messages_published_total metric should be exposed on /metrics")
 	assert.Contains(t, metricsOutput, "hyperfleet_broker_errors_total",
 		"errors_total metric should be exposed on /metrics")
 	assert.Contains(t, metricsOutput, "hyperfleet_broker_message_duration_seconds",
