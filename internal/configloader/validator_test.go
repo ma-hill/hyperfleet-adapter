@@ -21,6 +21,55 @@ func newTaskValidator(cfg *AdapterTaskConfig) *TaskConfigValidator {
 	return NewTaskConfigValidator(cfg, "")
 }
 
+func TestValidateActionBaseName(t *testing.T) {
+	t.Run("valid name", func(t *testing.T) {
+		cfg := baseTaskConfig()
+		cfg.Preconditions = []Precondition{{
+			ActionBase: ActionBase{Name: "fetchCluster"},
+			Expression: "true",
+		}}
+		err := newTaskValidator(cfg).ValidateStructure()
+		require.NoError(t, err)
+	})
+
+	t.Run("invalid name with hyphen", func(t *testing.T) {
+		cfg := baseTaskConfig()
+		cfg.Preconditions = []Precondition{{
+			ActionBase: ActionBase{Name: "fetch-cluster"},
+			Expression: "true",
+		}}
+		err := newTaskValidator(cfg).ValidateStructure()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "must start with lowercase letter and contain only letters, numbers, underscores")
+	})
+
+	t.Run("invalid name starting with uppercase", func(t *testing.T) {
+		cfg := baseTaskConfig()
+		cfg.Preconditions = []Precondition{{
+			ActionBase: ActionBase{Name: "FetchCluster"},
+			Expression: "true",
+		}}
+		err := newTaskValidator(cfg).ValidateStructure()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "must start with lowercase letter and contain only letters, numbers, underscores")
+	})
+
+	t.Run("post action invalid name with hyphen", func(t *testing.T) {
+		cfg := baseTaskConfig()
+		cfg.Post = &PostConfig{
+			PostActions: []PostAction{{
+				ActionBase: ActionBase{
+					Name:    "update-status",
+					APICall: &APICall{Method: "POST", URL: "/status"},
+				},
+			}},
+		}
+		err := newTaskValidator(cfg).ValidateStructure()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "must start with lowercase letter and contain only letters, numbers, underscores")
+	})
+}
+
 func TestValidateConditionOperators(t *testing.T) {
 	// Helper to create task config with a single condition
 	withCondition := func(cond Condition) *AdapterTaskConfig {
@@ -956,4 +1005,90 @@ func TestValidateFileReferencesManifestRef(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestValidateLifecycleConfig(t *testing.T) {
+	// minResource satisfies required fields (manifest, discovery) so we can focus on lifecycle validation.
+	minDiscovery := &DiscoveryConfig{ByName: "my-resource"}
+	minManifest := map[string]interface{}{"apiVersion": "v1", "kind": "ConfigMap"}
+
+	withLifecycle := func(del *LifecycleDelete) *AdapterTaskConfig {
+		cfg := baseTaskConfig()
+		cfg.Resources = []Resource{{
+			Name:      "myResource",
+			Discovery: minDiscovery,
+			Manifest:  minManifest,
+			Lifecycle: &ResourceLifecycle{Delete: del},
+		}}
+		return cfg
+	}
+
+	t.Run("valid lifecycle delete with when expression", func(t *testing.T) {
+		cfg := withLifecycle(&LifecycleDelete{
+			When: &LifecycleWhen{Expression: "deletedTime != null"},
+		})
+		v := newTaskValidator(cfg)
+		require.NoError(t, v.ValidateStructure())
+		require.NoError(t, v.ValidateSemantic())
+	})
+
+	t.Run("lifecycle delete missing when block", func(t *testing.T) {
+		cfg := withLifecycle(&LifecycleDelete{
+			PropagationPolicy: "Background",
+		})
+		err := newTaskValidator(cfg).ValidateSemantic()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "lifecycle.delete.when.expression is required")
+	})
+
+	t.Run("lifecycle delete with empty when expression", func(t *testing.T) {
+		cfg := withLifecycle(&LifecycleDelete{
+			When: &LifecycleWhen{Expression: ""},
+		})
+		err := newTaskValidator(cfg).ValidateSemantic()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "lifecycle.delete.when.expression is required")
+	})
+
+	t.Run("lifecycle delete with invalid propagationPolicy", func(t *testing.T) {
+		cfg := withLifecycle(&LifecycleDelete{
+			PropagationPolicy: "Invalid",
+			When:              &LifecycleWhen{Expression: "deletedTime != null"},
+		})
+		err := newTaskValidator(cfg).ValidateSemantic()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid propagationPolicy")
+	})
+
+	t.Run("lifecycle delete with invalid CEL expression", func(t *testing.T) {
+		cfg := withLifecycle(&LifecycleDelete{
+			When: &LifecycleWhen{Expression: "deletedTime != null &&"},
+		})
+		err := newTaskValidator(cfg).ValidateSemantic()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "CEL parse error")
+	})
+
+	t.Run("lifecycle delete missing discovery", func(t *testing.T) {
+		cfg := baseTaskConfig()
+		cfg.Resources = []Resource{{
+			Name:     "myResource",
+			Manifest: minManifest,
+			// Discovery intentionally absent
+			Lifecycle: &ResourceLifecycle{Delete: &LifecycleDelete{
+				When: &LifecycleWhen{Expression: "is_deleting"},
+			}},
+		}}
+		err := newTaskValidator(cfg).ValidateSemantic()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "lifecycle.delete requires a discovery config")
+	})
+
+	t.Run("no lifecycle config is valid", func(t *testing.T) {
+		cfg := baseTaskConfig()
+		cfg.Resources = []Resource{{Name: "myResource", Discovery: minDiscovery, Manifest: minManifest}}
+		v := newTaskValidator(cfg)
+		require.NoError(t, v.ValidateStructure())
+		require.NoError(t, v.ValidateSemantic())
+	})
 }

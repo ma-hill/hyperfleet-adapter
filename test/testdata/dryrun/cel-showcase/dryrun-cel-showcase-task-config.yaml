@@ -51,7 +51,7 @@ params:
 # Preconditions — CEL capture patterns
 # ===========================================================================
 preconditions:
-  - name: "fetch-cluster"
+  - name: "fetchCluster"
     api_call:
       method: "GET"
       url: "/api/hyperfleet/v1/clusters/{{ .clusterId }}"
@@ -296,6 +296,12 @@ post:
                   ? "Resources skipped: " + adapter.?skipReason.orValue("unknown reason")
                   : "Adapter execution completed successfully"
 
+          # Finalized: Deletion cleanup status — always False; this adapter has no deletion flow.
+          - type: "Finalized"
+            status: "False"
+            reason: "NotDeleting"
+            message: "No pending deletion for this adapter instance"
+
         # Pattern 15: Go template rendering in payload values
         observed_generation:
           expression: "generation"
@@ -355,7 +361,7 @@ post:
           cluster_url: "https://console.{{ .region }}.hyperfleet.io/clusters/{{ .clusterId }}"
 
   post_actions:
-    - name: "update-status"
+    - name: "updateStatus"
       api_call:
         method: "PATCH"
         url: "/api/hyperfleet/v1/clusters/{{ .clusterId }}/statuses"
