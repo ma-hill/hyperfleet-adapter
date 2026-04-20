@@ -280,3 +280,16 @@ serviceMonitor:
   # When set, a namespaceSelector.matchNames is automatically added pointing to the
   # release namespace so Prometheus can discover the Service across namespaces.
   namespace: ""
+
+tracing:
+  enabled: true
+  serviceName: "hyperfleet-adapter"
+  # OTLP exporter endpoint (traces go to stdout if not set)
+  otlpEndpoint: ""
+  # OTLP protocol: grpc (default) or http/protobuf
+  otlpProtocol: "grpc"
+  # Sampler type (default per tracing standard)
+  sampler: "parentbased_traceidratio"
+  # Sampling rate: 1.0 for dev, 0.01 for production
+  samplerArg: "1.0"
+  propagators: "tracecontext,baggage"
