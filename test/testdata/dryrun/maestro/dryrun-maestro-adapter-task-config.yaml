@@ -42,7 +42,7 @@ preconditions:
       - field: clusterStatus
         operator: notEquals
         value: "True"
-    name: fetch-cluster
+    name: fetchCluster
 resources:
   - discovery:
       #by_name: "cluster-{{ .clusterId }}-config"
@@ -265,6 +265,11 @@ post:
                 ? "True"
                 : "False"
             type: Health
+          # Finalized: Deletion cleanup status — always False; this adapter has no deletion flow.
+          - status: "False"
+            reason: "NotDeleting"
+            message: "No pending deletion for this adapter instance"
+            type: Finalized
         # Data extracted from discovered resources (nested discoveries are top-level keys)
         data:
           configmap:
@@ -308,4 +313,4 @@ post:
         body: '{{ .statusPayload }}'
         method: POST
         url: /api/hyperfleet/v1/clusters/{{ .clusterId }}/statuses
-      name: update-status
+      name: updateStatus

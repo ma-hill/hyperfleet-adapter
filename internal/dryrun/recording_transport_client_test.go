@@ -12,6 +12,7 @@ import (
 	"github.com/openshift-hyperfleet/hyperfleet-adapter/internal/transportclient"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 
@@ -334,6 +335,99 @@ func TestDiscoverResources_EmptyStore(t *testing.T) {
 	list, err := client.DiscoverResources(ctx, gvk, disc, nil)
 	require.NoError(t, err)
 	assert.Empty(t, list.Items)
+}
+
+// maestroTarget is a non-nil transport context value that represents a Maestro call.
+// The concrete type doesn't matter here — only nil vs non-nil is tested.
+var maestroTarget transportclient.TransportContext = struct{ ConsumerName string }{"cluster-1"}
+
+func TestDeleteResource_Kubernetes_RemovesFromStore(t *testing.T) {
+	ctx := context.Background()
+	client := NewDryrunTransportClient()
+	gvk := schema.GroupVersionKind{Group: "", Version: "v1", Kind: "ConfigMap"}
+
+	_, err := client.ApplyResource(ctx, makeManifest("v1", "ConfigMap", "default", "my-cm"), nil, nil)
+	require.NoError(t, err)
+
+	// K8s delete: nil target → synchronous, resource must be gone immediately.
+	err = client.DeleteResource(ctx, gvk, "default", "my-cm", nil, nil)
+	require.NoError(t, err)
+
+	disc := &testDiscovery{namespace: "default", name: "my-cm", singleResource: true}
+	list, err := client.DiscoverResources(ctx, gvk, disc, nil)
+	require.NoError(t, err)
+	assert.Empty(t, list.Items, "K8s resource must be removed from store immediately after delete")
+
+	// Delete record must be appended (1 apply + 1 delete + 1 discover).
+	deleteFound := false
+	for _, r := range client.Records {
+		if r.Operation == operationDelete {
+			deleteFound = true
+			assert.Equal(t, "my-cm", r.Name)
+		}
+	}
+	assert.True(t, deleteFound)
+}
+
+func TestDeleteResource_Maestro_SetsDeleteTimestampAndKeepsInStore(t *testing.T) {
+	ctx := context.Background()
+	client := NewDryrunTransportClient()
+	gvk := schema.GroupVersionKind{Group: "", Version: "v1", Kind: "ConfigMap"}
+
+	_, err := client.ApplyResource(ctx, makeManifest("v1", "ConfigMap", "default", "my-cm"), nil, nil)
+	require.NoError(t, err)
+
+	// Maestro delete: non-nil target → async, resource must stay with deletionTimestamp.
+	err = client.DeleteResource(ctx, gvk, "default", "my-cm", nil, maestroTarget)
+	require.NoError(t, err)
+
+	disc := &testDiscovery{namespace: "default", name: "my-cm", singleResource: true}
+	list, err := client.DiscoverResources(ctx, gvk, disc, nil)
+	require.NoError(t, err)
+	require.Len(t, list.Items, 1, "Maestro resource must remain in store after delete (async cleanup)")
+
+	ts := list.Items[0].GetDeletionTimestamp()
+	assert.NotNil(t, ts, "deletionTimestamp must be set for Maestro async delete")
+	assert.False(t, ts.IsZero())
+}
+
+func TestDeleteResource_NonExistentResource_ReturnsNotFound(t *testing.T) {
+	ctx := context.Background()
+	client := NewDryrunTransportClient()
+	gvk := schema.GroupVersionKind{Group: "", Version: "v1", Kind: "ConfigMap"}
+
+	// K8s transport: deleting a resource absent from the store returns NotFound,
+	// matching real API behavior. No record should be appended.
+	err := client.DeleteResource(ctx, gvk, "default", "ghost", nil, nil)
+	require.Error(t, err)
+	assert.True(t, apierrors.IsNotFound(err))
+	assert.Empty(t, client.Records)
+}
+
+func TestDeleteResource_WithOverrides_Maestro_SetsDeleteTimestamp(t *testing.T) {
+	ctx := context.Background()
+	overrides := DiscoveryOverrides{
+		"my-cm": {
+			"apiVersion": "v1",
+			"kind":       "ConfigMap",
+			"metadata": map[string]interface{}{
+				"name":      "my-cm",
+				"namespace": "default",
+			},
+		},
+	}
+	client := NewDryrunTransportClientWithOverrides(overrides)
+	gvk := schema.GroupVersionKind{Group: "", Version: "v1", Kind: "ConfigMap"}
+
+	// Maestro delete on a pre-loaded override resource.
+	err := client.DeleteResource(ctx, gvk, "default", "my-cm", nil, maestroTarget)
+	require.NoError(t, err)
+
+	disc := &testDiscovery{namespace: "default", name: "my-cm", singleResource: true}
+	list, err := client.DiscoverResources(ctx, gvk, disc, nil)
+	require.NoError(t, err)
+	require.Len(t, list.Items, 1)
+	assert.NotNil(t, list.Items[0].GetDeletionTimestamp())
 }
 
 func TestConcurrentApplyAndGet(t *testing.T) {

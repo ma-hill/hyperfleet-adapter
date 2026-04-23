@@ -28,7 +28,7 @@ params:
     default: "dry-run-adapter"
 
 preconditions:
-  - name: "fetch-cluster"
+  - name: "fetchCluster"
     api_call:
       method: "GET"
       url: "/api/hyperfleet/v1/clusters/{{ .clusterId }}"
@@ -36,6 +36,9 @@ preconditions:
     capture:
       - name: "clusterName"
         field: "name"
+      - name: "clusterStatus2"
+        expression: |
+           non_existent
       - name: "clusterStatus"
         expression: |
           status.conditions.filter(c, c.type == "Ready").size() > 0
@@ -173,6 +176,12 @@ post:
                   ? "Resources skipped: " + adapter.?skipReason.orValue("unknown reason")
                   : "Adapter execution completed successfully"
 
+          # Finalized: Deletion cleanup status — always False; this adapter has no deletion flow.
+          - type: "Finalized"
+            status: "False"
+            reason: "NotDeleting"
+            message: "No pending deletion for this adapter instance"
+
         observed_generation:
           expression: "generation"
         observed_time: "{{ now | date \"2006-01-02T15:04:05Z07:00\" }}"
@@ -191,10 +200,10 @@ post:
                 resources.?configmap0.?metadata.?name.orValue("")
             clusterId:
               expression: |
-                resources.?configmap0.?data.?cluster_id.orValue("")
+                clusterStatus2
 
   post_actions:
-    - name: "update-status"
+    - name: "updateStatus"
       api_call:
         method: "PATCH"
         url: "/api/hyperfleet/v1/clusters/{{ .clusterId }}/statuses"
